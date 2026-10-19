@@ -13,8 +13,7 @@
       "type": "string"
     },
     "domain": {
-      "type": "string",
-      "description": "root domain, e.g. example.com"
+      "type": "string"
     },
     "server": {
       "type": "object",
@@ -133,9 +132,6 @@
               "https"
             ],
             "default": "http"
-          },
-          "note": {
-            "type": "string"
           }
         }
       }

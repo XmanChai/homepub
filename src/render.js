@@ -60,27 +60,38 @@ export function renderFrpcService(version) {
 
 export function renderClientInstall(cfg, version) {
   return '#!/usr/bin/env bash\n' + hashHeader(version, 'install frpc config on the home server') + [
-    'set -euo pipefail',
+    'set -Eeuo pipefail',
     'HERE="$(cd "$(dirname "$0")" && pwd)"',
     'TARGET="${FRPC_CONFIG:-' + cfg.paths.frpcConfig + '}"',
+    'UNIT_TARGET=/etc/systemd/system/frpc.service',
     'TS="$(date +%Y%m%d-%H%M%S)"',
     '',
     'if [ ! -f "$HERE/frpc.toml" ] || [ ! -f "$HERE/frpc.service" ]; then',
     '  echo "frpc.toml / frpc.service not found next to this script" >&2',
     '  exit 1',
     'fi',
-    'if grep -q "CHANGE_ME_TOKEN" "$HERE/frpc.toml"; then',
-    '  echo "WARNING: frpc.toml still contains CHANGE_ME_TOKEN." >&2',
-    '  echo "         Re-run: homepub apply --token \\"$FRP_TOKEN\\"" >&2',
+    '',
+    '# refusing to install a placeholder token is safer than breaking a working tunnel',
+    'if grep -q "CHANGE_ME_TOKEN" "$HERE/frpc.toml" && [ "${HOMEPUB_FORCE:-0}" != "1" ]; then',
+    '  echo "ERROR: frpc.toml still contains CHANGE_ME_TOKEN." >&2',
+    '  echo "       Run: homepub apply --token \"\$FRP_TOKEN\"  (or set HOMEPUB_FORCE=1 if you really mean it)" >&2',
+    '  exit 1',
     'fi',
     '',
-    'install -d "$(dirname "$TARGET")"',
-    'if [ -f "$TARGET" ]; then',
-    '  cp -a "$TARGET" "$TARGET.bak.$TS"',
-    '  echo "backup: $TARGET.bak.$TS"',
+    'FRPC_BIN="${FRPC_BIN:-$(command -v frpc || true)}"',
+    'if [ -z "$FRPC_BIN" ]; then',
+    '  echo "ERROR: frpc not found in PATH. Install frp first, or set FRPC_BIN=/path/to/frpc" >&2',
+    '  exit 1',
     'fi',
+    'echo "using frpc: $FRPC_BIN"',
+    '',
+    'install -d "$(dirname "$TARGET")"',
+    'if [ -f "$TARGET" ]; then cp -a "$TARGET" "$TARGET.bak.$TS"; echo "backup: $TARGET.bak.$TS"; fi',
     'install -m 600 "$HERE/frpc.toml" "$TARGET"',
-    'install -m 644 "$HERE/frpc.service" /etc/systemd/system/frpc.service',
+    '',
+    'if [ -f "$UNIT_TARGET" ]; then cp -a "$UNIT_TARGET" "$UNIT_TARGET.bak.$TS"; echo "backup: $UNIT_TARGET.bak.$TS"; fi',
+    'sed "s#^ExecStart=.*#ExecStart=$FRPC_BIN -c $TARGET#" "$HERE/frpc.service" > "$UNIT_TARGET"',
+    'chmod 644 "$UNIT_TARGET"',
     '',
     'systemctl daemon-reload',
     'systemctl enable frpc >/dev/null 2>&1 || true',
@@ -88,12 +99,33 @@ export function renderClientInstall(cfg, version) {
     'systemctl --no-pager --lines=20 status frpc || true',
     '',
     'echo',
-    'echo "rollback: restore the matching .bak file next to $TARGET, then systemctl restart frpc"',
+    'echo "rollback: restore the matching .bak files next to $TARGET and $UNIT_TARGET, then systemctl restart frpc"',
     ''
   ].join('\n');
 }
 
-export function renderNginx(cfg, svc, port, version) {
+/** HTTP-only site used before a certificate exists (ACME challenge + 503). */
+export function renderNginxBootstrap(cfg, svc, version) {
+  return banner(version, 'bootstrap site (no certificate yet): ' + svc.host) + [
+    'server {',
+    '    listen 80;',
+    '    server_name ' + svc.host + ';',
+    '',
+    '    location /.well-known/acme-challenge/ {',
+    '        root ' + cfg.paths.acmeWebroot + ';',
+    '    }',
+    '',
+    '    location / {',
+    '        default_type text/plain;',
+    '        return 503 "homepub: certificate is being issued, retry in a minute";',
+    '    }',
+    '}',
+    ''
+  ].join('\n');
+}
+
+/** Full site: HTTP (ACME + redirect) and HTTPS proxied to the tunnel port. */
+export function renderNginxSite(cfg, svc, port, version) {
   const certBase = cfg.paths.nginxCertsDir.replace(/\/+$/, '');
   return banner(version, 'nginx site: ' + svc.host) + [
     'server {',
@@ -110,7 +142,7 @@ export function renderNginx(cfg, svc, port, version) {
     '}',
     '',
     'server {',
-    '    listen 443 ssl http2;',
+    '    listen 443 ssl;',
     '    server_name ' + svc.host + ';',
     '',
     '    ssl_certificate     ' + certBase + '/' + svc.host + '.pem;',
@@ -138,75 +170,6 @@ export function renderNginx(cfg, svc, port, version) {
   ].join('\n');
 }
 
-export function renderAcme(cfg, version) {
-  const lines = [
-    '#!/usr/bin/env bash',
-    hashHeader(version, 'issue/renew TLS certificates with acme.sh').trimEnd(),
-    'set -euo pipefail',
-    'ACME="${ACME_HOME:-' + cfg.paths.acmeHome + '}/acme.sh"',
-    'WEBROOT="${ACME_WEBROOT:-' + cfg.paths.acmeWebroot + '}"',
-    'CERT_DIR="${CERT_DIR:-' + cfg.paths.nginxCertsDir + '}"',
-    'mkdir -p "$CERT_DIR" "$WEBROOT"',
-    '',
-    'issue() {',
-    '  local domain="$1"',
-    '  echo "==> $domain"',
-    '  # acme.sh exit code 2 means "not due for renewal", which is fine',
-    '  if ! "$ACME" --issue -d "$domain" --webroot "$WEBROOT" --keylength ec-256; then',
-    '    local rc=$?',
-    '    if [ "$rc" -ne 2 ]; then',
-    '      echo "acme.sh failed for $domain (exit $rc)" >&2',
-    '      return "$rc"',
-    '    fi',
-    '  fi',
-    '  "$ACME" --install-cert -d "$domain" --ecc \\',
-    '    --key-file "$CERT_DIR/$domain.key" \\',
-    '    --fullchain-file "$CERT_DIR/$domain.pem" \\',
-    '    --reloadcmd "systemctl reload nginx"',
-    '}',
-    ''
-  ];
-  for (const svc of cfg.services) lines.push('issue ' + svc.host);
-  lines.push('', 'echo', 'echo "done. check: systemctl reload nginx"', '');
-  return lines.join('\n');
-}
-
-export function renderServerInstall(cfg, version) {
-  const lines = [
-    '#!/usr/bin/env bash',
-    hashHeader(version, 'install nginx sites on the public server').trimEnd(),
-    'set -euo pipefail',
-    'HERE="$(cd "$(dirname "$0")" && pwd)"',
-    'CONF_DIR="${NGINX_CONF_DIR:-' + cfg.paths.nginxConfDir + '}"',
-    'TS="$(date +%Y%m%d-%H%M%S)"',
-    'mkdir -p "$CONF_DIR"',
-    '',
-    'install_one() {',
-    '  local file="$1"',
-    '  local target="$CONF_DIR/$file"',
-    '  if [ -f "$target" ]; then',
-    '    cp -a "$target" "$target.bak.$TS"',
-    '    echo "backup: $target.bak.$TS"',
-    '  fi',
-    '  install -m 644 "$HERE/nginx/$file" "$target"',
-    '  echo "installed: $target"',
-    '}',
-    ''
-  ];
-  lines.push('install_one "00-homepub-map.conf"');
-  for (const svc of cfg.services) lines.push('install_one "' + svc.host + '.conf"');
-  lines.push(
-    '',
-    'nginx -t',
-    'systemctl reload nginx',
-    '',
-    'echo',
-    'echo "rollback: rename the *.bak.$TS files back and reload nginx"',
-    ''
-  );
-  return lines.join('\n');
-}
-
 export function renderMapConf(version) {
   return banner(version, 'http-context map used by every site (WebSocket friendly)') + [
     'map $http_upgrade $connection_upgrade {',
@@ -217,12 +180,186 @@ export function renderMapConf(version) {
   ].join('\n');
 }
 
-export function renderFrpsSnippet(cfg, version) {
-  return banner(version, 'append to frps.toml on the public server') + [
-    '# Only bind tunnel ports on loopback; nginx is the only public entry point.',
+export function renderAcme(cfg, version) {
+  const lines = [
+    '#!/usr/bin/env bash',
+    hashHeader(version, 'issue/renew TLS certificates with acme.sh').trimEnd(),
+    'set -Eeuo pipefail',
+    'ACME="${ACME_HOME:-' + cfg.paths.acmeHome + '}/acme.sh"',
+    'WEBROOT="${ACME_WEBROOT:-' + cfg.paths.acmeWebroot + '}"',
+    'CERT_DIR="${CERT_DIR:-' + cfg.paths.nginxCertsDir + '}"',
+    'mkdir -p "$CERT_DIR" "$WEBROOT"',
+    '',
+    'if [ ! -x "$ACME" ]; then',
+    '  echo "ERROR: acme.sh not found at $ACME" >&2',
+    '  echo "       install it from https://github.com/acmesh-official/acme.sh" >&2',
+    '  exit 1',
+    'fi',
+    '',
+    'issue() {',
+    '  local domain="$1"',
+    '  local rc=0',
+    '  echo "==> $domain"',
+    '  # acme.sh exit code 2 means "not due for renewal", which is fine',
+    '  "$ACME" --issue -d "$domain" --webroot "$WEBROOT" --keylength ec-256 || rc=$?',
+    '  if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then',
+    '    echo "acme.sh failed for $domain (exit $rc)" >&2',
+    '    return "$rc"',
+    '  fi',
+    '  "$ACME" --install-cert -d "$domain" --ecc \\',
+    '    --key-file "$CERT_DIR/$domain.key" \\',
+    '    --fullchain-file "$CERT_DIR/$domain.pem" \\',
+    '    --reloadcmd "systemctl reload nginx"',
+    '  if [ ! -f "$CERT_DIR/$domain.pem" ] || [ ! -f "$CERT_DIR/$domain.key" ]; then',
+    '    echo "certificate files missing after install-cert for $domain" >&2',
+    '    return 1',
+    '  fi',
+    '}',
+    ''
+  ];
+  for (const svc of cfg.services) lines.push('issue ' + svc.host);
+  lines.push('', 'echo', 'echo "done: certificates installed. run install.sh again to switch sites to HTTPS."', '');
+  return lines.join('\n');
+}
+
+export function renderServerInstall(cfg, version) {
+  const hosts = cfg.services.map((svc) => svc.host);
+  return '#!/usr/bin/env bash\n' + hashHeader(version, 'install nginx sites on the public server').trimEnd() + [
+    '',
+    '# Two-phase install: HTTP bootstrap (ACME + 503) -> issue certificates -> HTTPS sites.',
+    '# Every change is backed up and rolled back if nginx -t fails.',
+    'set -Eeuo pipefail',
+    'HERE="$(cd "$(dirname "$0")" && pwd)"',
+    'CONF_DIR="${NGINX_CONF_DIR:-' + cfg.paths.nginxConfDir + '}"',
+    'CERT_DIR="${CERT_DIR:-' + cfg.paths.nginxCertsDir + '}"',
+    'MANIFEST="$CONF_DIR/.homepub-managed"',
+    'BACKUP_DIR="$(mktemp -d -t homepub.XXXXXX)"',
+    'CHANGED=()',
+    'ADDED=()',
+    'HOSTS=(' + hosts.join(' ') + ')',
+    '',
+    'rollback() {',
+    '  local rc=$?',
+    '  echo "ERROR: rolling back nginx config changes" >&2',
+    '  local f',
+    '  for f in "${ADDED[@]:-}"; do [ -n "$f" ] && rm -f "$f"; done',
+    '  for f in "${CHANGED[@]:-}"; do [ -n "$f" ] && cp -a "$BACKUP_DIR/$(basename "$f")" "$f"; done',
+    '  if nginx -t >/dev/null 2>&1; then systemctl reload nginx || true; fi',
+    '  rm -rf "$BACKUP_DIR"',
+    '  exit "$rc"',
+    '}',
+    '',
+    'install_conf() {',
+    '  local host="$1" variant="$2" target="$CONF_DIR/$host.conf"',
+    '  if [ ! -f "$HERE/nginx/$variant/$host.conf" ]; then',
+    '    echo "missing $HERE/nginx/$variant/$host.conf" >&2',
+    '    return 1',
+    '  fi',
+    '  if [ -f "$target" ]; then',
+    '    cp -a "$target" "$BACKUP_DIR/$host.conf"',
+    '    CHANGED+=("$target")',
+    '  else',
+    '    ADDED+=("$target")',
+    '  fi',
+    '  install -m 644 "$HERE/nginx/$variant/$host.conf" "$target"',
+    '}',
+    '',
+    'prune_removed_hosts() {',
+    '  [ -f "$MANIFEST" ] || return 0',
+    '  local old keep h',
+    '  while read -r old; do',
+    '    [ -n "$old" ] || continue',
+    '    keep=0',
+    '    for h in "${HOSTS[@]}"; do [ "$h" = "$old" ] && keep=1; done',
+    '    [ "$keep" -eq 1 ] && continue',
+    '    local target="$CONF_DIR/$old.conf"',
+    '    if [ -f "$target" ]; then',
+    '      cp -a "$target" "$BACKUP_DIR/$old.conf"',
+    '      CHANGED+=("$target")',
+    '      rm -f "$target"',
+    '      echo "removed stale site: $target"',
+    '    fi',
+    '  done < "$MANIFEST"',
+    '}',
+    '',
+    'write_manifest() {',
+    '  : > "$MANIFEST"',
+    '  local h',
+    '  for h in "${HOSTS[@]}"; do echo "$h" >> "$MANIFEST"; done',
+    '}',
+    '',
+    'test_and_reload() {',
+    '  if ! nginx -t; then',
+    '    echo "nginx -t failed" >&2',
+    '    return 1',
+    '  fi',
+    '  systemctl reload nginx',
+    '}',
+    '',
+    'trap rollback ERR',
+    '',
+    'mkdir -p "$CONF_DIR"',
+    'NEED_CERTS=0',
+    'for host in "${HOSTS[@]}"; do',
+    '  if [ -f "$CERT_DIR/$host.pem" ] && [ -f "$CERT_DIR/$host.key" ]; then',
+    '    install_conf "$host" sites',
+    '  else',
+    '    install_conf "$host" bootstrap',
+    '    NEED_CERTS=1',
+    '  fi',
+    'done',
+    'prune_removed_hosts',
+    'write_manifest',
+    'test_and_reload',
+    'trap - ERR',
+    '',
+    'if [ "$NEED_CERTS" -eq 1 ]; then',
+    '  if [ -x "$HERE/acme.sh" ]; then',
+    '    if ! bash "$HERE/acme.sh"; then',
+    '      echo "acme.sh failed; sites stay on the HTTP bootstrap (503) for now" >&2',
+    '      rm -rf "$BACKUP_DIR"',
+    '      exit 1',
+    '    fi',
+    '    trap rollback ERR',
+    '    for host in "${HOSTS[@]}"; do install_conf "$host" sites; done',
+    '    test_and_reload',
+    '    trap - ERR',
+    '  else',
+    '    echo "no acme.sh next to this script; run it, then re-run install.sh to switch to HTTPS"',
+    '  fi',
+    'fi',
+    '',
+    'rm -rf "$BACKUP_DIR"',
+    'echo',
+    'echo "done. sites installed: " "${HOSTS[*]}"',
+    ''
+  ].join('\n');
+}
+
+export function renderFrpsExample(cfg, version) {
+  return banner(version, 'example frps.toml for the public server') + [
+    'bindPort = ' + cfg.server.port,
     'proxyBindAddr = ' + JSON.stringify(cfg.server.bindAddr),
     '',
-    '# Restrict which remote ports clients are allowed to use.',
+    'auth.method = "token"',
+    'auth.token = "CHANGE_ME_TOKEN"',
+    '',
+    'allowPorts = [',
+    '  { start = ' + cfg.tunnel.portStart + ', end = ' + cfg.tunnel.portEnd + ' }',
+    ']',
+    ''
+  ].join('\n');
+}
+
+export function renderFrpsSnippet(cfg, version) {
+  return banner(version, 'append these to frps.toml on the public server').trimEnd() + [
+    '',
+    '# IMPORTANT: put these lines at the TOP of frps.toml, before the first [table].',
+    '# Appending them after a [table] makes TOML parse them as keys of that table,',
+    '# and proxyBindAddr silently falls back to bindAddr (0.0.0.0), exposing your',
+    '# tunnel ports to the internet.',
+    'proxyBindAddr = ' + JSON.stringify(cfg.server.bindAddr),
+    '',
     'allowPorts = [',
     '  { start = ' + cfg.tunnel.portStart + ', end = ' + cfg.tunnel.portEnd + ' }',
     ']',
@@ -237,7 +374,8 @@ export function renderPortsMarkdown(cfg, ports, version) {
   return [
     '# Port ledger',
     '',
-    '> generated by homepub v' + version + ' - keep this file in git: it is what keeps tunnel ports stable.',
+    '> generated by homepub v' + version + ' - human-readable copy of ports.json.',
+    '> ports.json (paths.ledger) is the machine-readable ledger and the one to commit.',
     '',
     '| service | public URL | local address | tunnel port (server loopback) |',
     '| --- | --- | --- | --- |',
@@ -246,7 +384,7 @@ export function renderPortsMarkdown(cfg, ports, version) {
     '## Server side',
     '',
     '- nginx terminates TLS and proxies to the tunnel port on 127.0.0.1.',
-    '- frps must set `proxyBindAddr = "' + cfg.server.bindAddr + '"` so tunnel ports are not reachable from the internet.',
+    '- frps must set proxyBindAddr = "' + cfg.server.bindAddr + '" so tunnel ports are not reachable from the internet.',
     '- open only 443 (and 80 for ACME) plus ' + cfg.server.port + '/tcp for frps in the firewall / security group.',
     ''
   ].join('\n');

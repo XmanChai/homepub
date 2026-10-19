@@ -47,10 +47,13 @@ test('builds every expected file deterministically', () => {
     'ports.md',
     'server/acme.sh',
     'server/frps-snippet.toml',
+    'server/frps.toml.example',
     'server/install.sh',
     'server/nginx/00-homepub-map.conf',
-    'server/nginx/blog.example.com.conf',
-    'server/nginx/nc.example.com.conf'
+    'server/nginx/bootstrap/blog.example.com.conf',
+    'server/nginx/bootstrap/nc.example.com.conf',
+    'server/nginx/sites/blog.example.com.conf',
+    'server/nginx/sites/nc.example.com.conf'
   ]);
   for (const [path, file] of first.files) {
     assert.equal(file.content, second.files.get(path).content, path + ' should be deterministic');
@@ -58,8 +61,6 @@ test('builds every expected file deterministically', () => {
   const ledger = JSON.parse(first.ledger.content);
   assert.deepEqual(ledger.services.map((s) => [s.name, s.tunnelPort]), [['blog', 18081], ['cloud', 18082]]);
   assert.equal(first.ledger.path, './ports.json');
-  assert.equal(first.ports.get('blog'), 18081);
-  assert.equal(first.ports.get('cloud'), 18082);
 });
 
 test('keeps ports stable across runs when previousPorts is supplied', () => {
@@ -75,4 +76,18 @@ test('warns when the token is missing', () => {
   assert.match(plan.warnings.join(' '), /CHANGE_ME_TOKEN/);
   const withToken = buildPlan(cfg, { version: '0.1.0', token: 'secret-token' });
   assert.equal(withToken.warnings.length, 0);
+});
+
+test('exhausted ranges are reported as ConfigError, not a crash', () => {
+  const cfg = normalize(baseConfig());
+  const forced = {
+    ...cfg,
+    tunnel: { portStart: 9000, portEnd: 9001 },
+    services: [
+      { ...cfg.services[0], name: 'a' },
+      { ...cfg.services[1], name: 'b' },
+      { ...cfg.services[0], name: 'c' }
+    ]
+  };
+  assert.throws(() => assignPorts(forced), ConfigError);
 });

@@ -57,3 +57,19 @@ test('rejects a broken server block', () => {
   assert.throws(() => normalize(baseConfig({ server: undefined })), /server: required/);
   assert.throws(() => normalize(baseConfig({ server: { addr: 'http://x' } })), /server.addr/);
 });
+test('reports unknown keys instead of silently ignoring them', () => {
+  const cfg = normalize({ ...baseConfig(), server: { addr: '203.0.113.10', bindAdr: '10.0.0.1' } });
+  assert.match(cfg.warnings.join(' '), /server.bindAdr is not a known option/);
+});
+
+test('rejects paths that could inject shell commands', () => {
+  const base = baseConfig();
+  assert.throws(
+    () => normalize({ ...base, paths: { nginxCertsDir: '/etc/nginx/certs; rm -rf /' } }),
+    /may only contain letters, digits/
+  );
+  assert.throws(
+    () => normalize({ ...base, paths: { out: '/tmp/ok/$(whoami)' } }),
+    /may only contain letters, digits/
+  );
+});

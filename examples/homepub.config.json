@@ -1,5 +1,4 @@
 {
-  "$schema": "https://raw.githubusercontent.com/yourname/homepub/main/docs/config.schema.json",
   "domain": "example.com",
   "server": {
     "addr": "203.0.113.10",
@@ -13,6 +12,7 @@
   },
   "paths": {
     "out": "./out",
+    "ledger": "./ports.json",
     "frpcConfig": "/etc/frp/frpc.toml",
     "nginxConfDir": "/etc/nginx/conf.d",
     "nginxCertsDir": "/etc/nginx/certs",
@@ -24,22 +24,19 @@
       "name": "blog",
       "subdomain": "blog",
       "localPort": 8090,
-      "healthPath": "/",
-      "note": "static blog"
+      "healthPath": "/"
     },
     {
       "name": "cloud",
       "subdomain": "nc",
       "localPort": 8080,
-      "healthPath": "/status.php",
-      "note": "Nextcloud"
+      "healthPath": "/status.php"
     },
     {
       "name": "music",
       "subdomain": "wav",
       "localPort": 8099,
-      "healthPath": "/healthz",
-      "note": "music player"
+      "healthPath": "/healthz"
     }
   ]
 }

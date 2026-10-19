@@ -12,10 +12,25 @@ export class ConfigError extends Error {
 const SERVICE_NAME = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 const DOMAIN = /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 const HOST = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+// paths end up inside generated shell scripts and nginx configs
+const SAFE_PATH = /^[A-Za-z0-9._/-]+$/;
 
 const fail = (path, message) => {
   throw new ConfigError(`${path}: ${message}`);
 };
+
+const KNOWN_ROOT = new Set(['$schema', 'domain', 'server', 'tunnel', 'paths', 'services']);
+const KNOWN_SERVER = new Set(['addr', 'port', 'tokenEnv', 'bindAddr']);
+const KNOWN_TUNNEL = new Set(['portStart', 'portEnd']);
+const KNOWN_PATHS = new Set(['out', 'ledger', 'frpcConfig', 'nginxConfDir', 'nginxCertsDir', 'acmeHome', 'acmeWebroot']);
+const KNOWN_SERVICE = new Set(['name', 'subdomain', 'localHost', 'localPort', 'healthPath', 'protocol']);
+
+function warnUnknown(obj, known, at, warnings) {
+  if (!obj || typeof obj !== 'object') return;
+  for (const key of Object.keys(obj)) {
+    if (!known.has(key)) warnings.push(`${at}.${key} is not a known option and was ignored`);
+  }
+}
 
 /** Load and validate a homepub.config.json file. */
 export function loadConfig(file, { baseDir = process.cwd() } = {}) {
@@ -38,11 +53,12 @@ export function loadConfig(file, { baseDir = process.cwd() } = {}) {
   return cfg;
 }
 
-/** Validate and fill defaults. Kept pure so it can be unit-tested. */
+/** Validate and fill defaults. Pure so it can be unit-tested. */
 export function normalize(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    fail('$', 'config must be a JSON object');
-  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('$', 'config must be a JSON object');
+
+  const warnings = [];
+  warnUnknown(raw, KNOWN_ROOT, '$', warnings);
 
   const domain = String(raw.domain ?? '').trim().toLowerCase();
   if (!domain) fail('domain', 'required, e.g. "example.com"');
@@ -50,6 +66,7 @@ export function normalize(raw) {
 
   const rawServer = raw.server;
   if (!rawServer || typeof rawServer !== 'object') fail('server', 'required object, e.g. { "addr": "203.0.113.10" }');
+  warnUnknown(rawServer, KNOWN_SERVER, 'server', warnings);
   const addr = String(rawServer.addr ?? '').trim();
   if (!addr) fail('server.addr', 'required: public address of your frps server');
   if (!HOST.test(addr)) fail('server.addr', `"${addr}" is not a valid hostname or IP address`);
@@ -58,8 +75,7 @@ export function normalize(raw) {
     addr,
     port: rawServer.port ?? 7000,
     tokenEnv: rawServer.tokenEnv ?? 'FRP_TOKEN',
-    bindAddr: rawServer.bindAddr ?? '127.0.0.1',
-    frpsConfigPath: rawServer.frpsConfigPath ?? '/etc/frp/frps.toml'
+    bindAddr: rawServer.bindAddr ?? '127.0.0.1'
   };
   if (!isPort(server.port)) fail('server.port', 'must be an integer between 1 and 65535');
   if (typeof server.tokenEnv !== 'string' || !/^[A-Z_][A-Z0-9_]*$/.test(server.tokenEnv)) {
@@ -71,22 +87,27 @@ export function normalize(raw) {
     portStart: raw.tunnel?.portStart ?? 18081,
     portEnd: raw.tunnel?.portEnd ?? 18099
   };
+  warnUnknown(raw.tunnel, KNOWN_TUNNEL, 'tunnel', warnings);
   if (!isPort(tunnel.portStart)) fail('tunnel.portStart', 'must be an integer between 1 and 65535');
   if (!isPort(tunnel.portEnd)) fail('tunnel.portEnd', 'must be an integer between 1 and 65535');
   if (tunnel.portStart > tunnel.portEnd) fail('tunnel', 'portStart must be <= portEnd');
 
   const rawPaths = raw.paths ?? {};
+  warnUnknown(rawPaths, KNOWN_PATHS, 'paths', warnings);
   const paths = {
     out: rawPaths.out ?? './out',
+    ledger: rawPaths.ledger ?? './ports.json',
     frpcConfig: rawPaths.frpcConfig ?? '/etc/frp/frpc.toml',
     nginxConfDir: rawPaths.nginxConfDir ?? '/etc/nginx/conf.d',
     nginxCertsDir: rawPaths.nginxCertsDir ?? '/etc/nginx/certs',
     acmeHome: rawPaths.acmeHome ?? '/root/.acme.sh',
-    acmeWebroot: rawPaths.acmeWebroot ?? '/var/www/acme',
-    ledger: rawPaths.ledger ?? './ports.json'
+    acmeWebroot: rawPaths.acmeWebroot ?? '/var/www/acme'
   };
   for (const [key, value] of Object.entries(paths)) {
     if (typeof value !== 'string' || value.trim() === '') fail(`paths.${key}`, 'must be a non-empty string');
+    if (!SAFE_PATH.test(value)) {
+      fail(`paths.${key}`, 'may only contain letters, digits, dot, dash, underscore and slash');
+    }
   }
 
   if (!Array.isArray(raw.services) || raw.services.length === 0) {
@@ -101,6 +122,8 @@ export function normalize(raw) {
   const services = raw.services.map((item, index) => {
     const at = `services[${index}]`;
     if (!item || typeof item !== 'object') fail(at, 'must be an object');
+    warnUnknown(item, KNOWN_SERVICE, at, warnings);
+
     const name = String(item.name ?? '').trim();
     if (!name) fail(`${at}.name`, 'required, e.g. "blog"');
     if (!SERVICE_NAME.test(name)) fail(`${at}.name`, `"${name}" must be lowercase letters, digits and dashes (max 32)`);
@@ -129,17 +152,8 @@ export function normalize(raw) {
     const protocol = item.protocol ?? 'http';
     if (protocol !== 'http' && protocol !== 'https') fail(`${at}.protocol`, 'must be "http" or "https"');
 
-    return {
-      name,
-      subdomain: sub,
-      host,
-      localHost,
-      localPort,
-      healthPath,
-      protocol,
-      note: typeof item.note === 'string' ? item.note : ''
-    };
+    return { name, subdomain: sub, host, localHost, localPort, healthPath, protocol };
   });
 
-  return { domain, server, tunnel, paths, services };
+  return { domain, server, tunnel, paths, services, warnings };
 }

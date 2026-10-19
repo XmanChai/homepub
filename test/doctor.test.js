@@ -6,7 +6,11 @@ import { baseConfig } from './helpers.js';
 
 const cfg = normalize(baseConfig());
 const fakePort = (ok) => async () => ({ ok, ms: 3, error: ok ? undefined : 'ECONNREFUSED' });
-const fakeDns = (addresses) => async () => ({ ok: addresses.length > 0, addresses });
+const fakeDns = (addresses) => async (host, expected) => ({
+  ok: addresses.includes(expected),
+  addresses,
+  expectedAddresses: [expected]
+});
 const fakeHttps = (ok, daysLeft = 60) => async () => ({ ok, status: ok ? 200 : 502, daysLeft, ms: 10 });
 
 test('all green', async () => {
@@ -47,4 +51,14 @@ test('a broken https endpoint is a failure', async () => {
     checkHttpsFn: fakeHttps(false)
   });
   assert.equal(ok, false);
+});
+
+test('an expired certificate is a failure even if the page responds', async () => {
+  const { ok, rows } = await runDoctor(cfg, {
+    checkPortFn: fakePort(true),
+    checkDnsFn: fakeDns([cfg.server.addr]),
+    checkHttpsFn: async () => ({ ok: false, status: 200, daysLeft: -4208, error: 'CERT_EXPIRED', ms: 5 })
+  });
+  assert.equal(ok, false);
+  assert.equal(rows[0].https.daysLeft, -4208);
 });

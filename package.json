@@ -17,12 +17,14 @@
     "examples",
     "README.md",
     "README.en.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
     "test": "node --test \"test/**/*.test.js\"",
     "test:watch": "node --test --watch \"test/**/*.test.js\"",
-    "demo": "node bin/homepub.js plan --config examples/homepub.config.json"
+    "demo": "node bin/homepub.js plan --config examples/homepub.config.json",
+    "test:e2e": "bash scripts/e2e-install.sh out-example"
   },
   "keywords": [
     "frp",
@@ -32,9 +34,5 @@
     "acme",
     "reverse-proxy",
     "tunnel"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/yourname/homepub"
-  }
+  ]
 }

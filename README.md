@@ -1,6 +1,6 @@
 # homepub
 
-一条命令把家里的服务发布到公网：`frp + nginx + ACME` 的配置生成、端口台账和体检。
+一条命令把家里的服务发布到公网：生成 `frp + nginx + ACME` 的配置、端口台账，并做体检。
 
 [English](README.en.md) | 中文
 
@@ -14,56 +14,45 @@
 
 ## 它解决什么问题
 
-给家庭服务器 / 小公司自建服务开公网，通常要在三处同时改配置：
+给家庭服务器 / 小公司自建服务开公网，通常要在三处同时改配置：家里的 `frpc.toml`、公网的 `frps.toml`、以及 nginx 站点 + 证书。改三处必然漏一处，于是：
 
-1. 家里那台：`frpc.toml`（服务名、本地端口、隧道端口）
-2. 公网那台：`frps.toml`（token、允许的端口段）
-3. 公网那台：nginx 站点 + 证书续期（`server_name`、`proxy_pass`、`ssl_certificate`）
-
-改三处必然漏一处，于是出现这些真实问题：
-
-- 18081–18092 的端口到底谁在用？没人说得清，加服务时开始撞端口。
-- 证书续期只配了一次，某天浏览器开始报错才发现。
-- 服务挂了不知道，等有人反馈"打不开"。
+- 18081–18099 的端口谁在用没人说得清，加服务开始撞端口；
+- 证书续期只配过一次，某天浏览器报错才发现；
+- 服务挂了没人知道；
 - 换机器时配置靠记忆重建。
 
-homepub 把"服务清单"变成唯一事实来源：你只写一份 JSON，它生成上面三处的配置、维护端口台账（`ports.json`）、并提供一条命令做体检。
+homepub 让你只写一份 JSON，生成上述配置、维护端口台账（`ports.json`），并提供一条命令做体检。
 
 ## 它不做什么（先说明白）
 
-- 不帮你买服务器、域名或做备案。
-- 不托管你的服务，也不碰运行中的数据。
-- 不替代 frps 部署，只生成需要追加的片段。
-- 不是 7×24 监控，`doctor` 是"我现在跑一下"的体检，不是告警平台。
-- 默认**不自动改生产配置**：它生成文件 + 带备份的安装脚本，最后一步由你执行。
+- 不帮你买服务器、域名或做备案；
+- 不托管你的服务，也不碰运行中的数据；
+- 不替代 frps 部署，只生成需要追加/替换的片段；
+- 不是 7×24 监控，`doctor` 是"我现在跑一下"的体检；
+- **生成阶段绝不改生产配置**：它写文件 + 带备份与回滚的安装脚本，最后一步由你执行。
 
 ## 快速开始
 
-要求：Node.js ≥ 22（生成端），一台装好 `frps` 的公网服务器，家里那台装好 `frpc`。
+要求：Node.js ≥ 22；一台装了 `frps` 的公网服务器；家里那台装了 `frpc`；公网服务器有 `acme.sh`。
 
 ```bash
-# 1) 生成一份配置模板
-npx homepub init
-#    （仓库内开发：node bin/homepub.js init）
+git clone <repo> && cd homepub     # 或 npm 发布后：npx homepub init
 
-# 2) 编辑 homepub.config.json：域名、公网 IP、每个服务的本地端口
+node bin/homepub.js init            # 生成 homepub.config.json
+# 编辑：domain、server.addr、每个服务的 localPort
 
-# 3) 看它准备生成什么、端口怎么分配（不写文件、不联网）
-npx homepub plan
+node bin/homepub.js plan            # 看要生成什么、端口怎么分（只读、不联网）
+export FRP_TOKEN='与 frps 一致的 token'
+node bin/homepub.js apply           # 写 out/ 与 ports.json
 
-# 4) 真写文件（token 从环境变量取，写进 frpc.toml 时权限 600）
-export FRP_TOKEN='和 frps 一致的 token'
-npx homepub apply
-
-# 5) 家里那台执行：
+# 家里那台（会把 frpc.toml 与 systemd unit 备份后安装；发现占位 token 会直接中止）
 sudo bash out/client/install.sh
 
-#    公网那台执行（先追加 out/server/frps-snippet.toml 到 frps.toml 并重启 frps）：
+# 公网那台：一条命令完成"HTTP 引导 → 签证书 → 切到 HTTPS"，失败自动回滚
 sudo bash out/server/install.sh
-sudo bash out/server/acme.sh        # 首次签发证书；acme.sh 会自动续期
 
-# 6) 体检：本地端口、DNS、公网 HTTPS、证书剩余天数
-npx homepub doctor
+# 体检：本地端口、DNS、公网 HTTPS、证书剩余天数（会做完整 TLS 校验）
+node bin/homepub.js doctor
 ```
 
 `doctor` 输出示例：
@@ -76,18 +65,24 @@ cloud         ok (3ms)                  ok                        302 (62d cert)
 music         FAIL ECONNREFUSED         ok                        FAIL ECONNREFUSED
 ```
 
+> 第一次安装时，`install.sh` 会先装"只有 80 端口 + ACME 校验"的引导站点（其余请求返回 503），
+> 再调用同目录的 `acme.sh` 签发证书，最后换成 443 站点。任何一步 `nginx -t` 失败都会回滚到安装前的配置。
+
 ## 命令
 
 | 命令 | 作用 |
 | --- | --- |
-| `homepub init [dir]` | 生成 `homepub.config.json` 模板 |
-| `homepub plan` | 显示将生成/修改哪些文件、端口如何分配（只读） |
-| `homepub apply` | 写入 `out/`，只更新内容有变化的文件；同时更新 `ports.json` |
-| `homepub status` | 打印端口台账（谁在用哪个隧道端口） |
-| `homepub doctor` | 检查本地端口 / DNS / 公网 HTTPS / 证书天数 |
-| `homepub help` | 帮助 |
+| `init [dir]` | 生成 `homepub.config.json` 模板 |
+| `plan` | 显示将创建/修改/删除哪些文件、端口如何分配（只读） |
+| `apply` | 写入 `out/`（只写内容有变化的文件）并更新 `ports.json` |
+| `status` | 打印端口台账 |
+| `doctor` | 检查本地端口 / DNS / 公网 HTTPS / 证书有效期 |
+| `help` | 帮助 |
 
-常用参数：`--config <path>`、`--out <dir>`、`--token <token>`、`--force`、`--json`。
+参数：`--config <path>`、`--out <dir>`、`--token <token>`、`--ledger <path>`、`--force`、`--prune`、`--json`。
+
+- `--prune`：删除"以前生成、现在不再属于配置"的文件（删服务后清理它的 nginx 站点）。
+- `--json`：`plan` / `status` / `doctor` 输出机器可读结果。
 
 ## 配置说明
 
@@ -115,47 +110,50 @@ music         FAIL ECONNREFUSED         ok                        FAIL ECONNREFU
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `domain` | 是 | 根域名，公网解析到 `server.addr` |
-| `server.addr` | 是 | 公网服务器地址（frps 所在） |
+| `server.addr` | 是 | 公网服务器地址（frps 所在），IP 或域名 |
 | `server.port` | 否 | frps 端口，默认 7000 |
 | `server.tokenEnv` | 否 | 从哪个环境变量读 token，默认 `FRP_TOKEN` |
-| `server.bindAddr` | 否 | 写进 frps 片段，默认 `127.0.0.1`（只绑回环，避免隧道端口暴露公网） |
-| `tunnel.portStart/portEnd` | 否 | 隧道端口段，默认 18081–18099；端口分配记录在台账里，不会随服务增减而漂移 |
-| `paths.out` | 否 | 生成目录，默认 `./out`（相对配置文件所在目录） |
-| `paths.ledger` | 否 | 端口台账位置，默认 `./ports.json`（相对配置文件；**建议提交进 git**） |
+| `server.bindAddr` | 否 | 写进 frps 片段，默认 `127.0.0.1`（只绑回环） |
+| `tunnel.portStart/portEnd` | 否 | 隧道端口段，默认 18081–18099 |
+| `paths.out` | 否 | 生成目录，默认 `./out`（相对配置文件） |
+| `paths.ledger` | 否 | 端口台账，默认 `./ports.json`（相对配置文件，**建议提交进 git**） |
+| `paths.*` | 否 | 只允许字母、数字、点、短横线、下划线和斜杠（防止注入） |
 | `services[].name` | 是 | 小写字母/数字/短横线，最长 32 |
-| `services[].subdomain` | 否 | 子域名，默认同 `name`；填 `""` 表示用根域名 |
+| `services[].subdomain` | 否 | 子域名，默认同 `name`；填 `""` 用根域名 |
 | `services[].localPort` | 是 | 家里服务的本地端口 |
 | `services[].localHost` | 否 | 默认 `127.0.0.1` |
 | `services[].healthPath` | 否 | `doctor` 探测路径，默认 `/` |
-| `services[].protocol` | 否 | 上游协议 `http` / `https`，默认 `http` |
+| `services[].protocol` | 否 | 上游协议，默认 `http` |
+
+未知字段会给出 warning（不再静默忽略）。
 
 ## 安全说明
 
-- **token 只进 `frpc.toml`（权限 600）**，不要提交到 git；仓库已忽略 `out/`。
-- **隧道端口只绑回环**：`out/server/frps-snippet.toml` 里的 `proxyBindAddr = "127.0.0.1"` 让 18081–18099 只能被本机 nginx 访问，不会直接暴露到公网。**这一步很重要，别跳过。**
+- **token 只进 `frpc.toml`（600）**；`out/` 已在 `.gitignore` 里。
+- **隧道端口只绑回环**：`server/frps-snippet.toml` 的 `proxyBindAddr = "127.0.0.1"` 让 18081–18099 只能被本机 nginx 访问。**这一行要放在 frps.toml 的第一个 `[table]` 之前**（放末尾会被 TOML 解析进表里而失效），或者直接用 `server/frps.toml.example` 替换整份配置。
 - 防火墙/安全组只放：`443`、`80`（ACME）、`7000/tcp`（frps）。
-- 生成的 nginx 配置包含 HTTP→HTTPS 跳转与 WebSocket 支持（`00-homepub-map.conf`）。
-- 建议再加 HSTS（确认全站 HTTPS 后）：`add_header Strict-Transport-Security "max-age=31536000" always;`
+- `server/install.sh` 会写 `conf.d/.homepub-managed` 清单，删掉的服务下次安装时自动清理旧站点。
+- 建议全站 HTTPS 后再加 HSTS：`add_header Strict-Transport-Security "max-age=31536000" always;`
 
 ## 与宝塔 / Nginx Proxy Manager / 1Panel 的区别
 
-那些是"带界面的 Web 服务器管理面板"，适合托管整台机器的站点；homepub 只做一件事：**把"家里服务 → 公网域名"这条链路生成正确、并且可校验**。它不抢 80/443 的默认站点，不接管 nginx 主配置，只往 `conf.d` 放 server 块。
+那些是"带界面的 Web 服务器管理面板"，适合托管整台机器；homepub 只做一件事：把"家里服务 → 公网域名"这条链路生成正确、可校验、可回滚。它不接管 nginx 主配置，只往 `conf.d` 放 server 块和一个 WebSocket 用的 map。
 
 ## 路线图
 
-- v0.1（当前）：TCP 隧道 + nginx 站点 + ACME + 端口台账 + doctor
-- v0.2：`doctor --watch` 周期体检；UDP / HTTPS 隧道类型；Cloudflare 代理场景说明
-- v0.3：可选 Web 界面（只读台账 + 一键生成）
-- 不计划：自动改生产配置（默认永远关）、内置监控告警平台
+- v0.1（当前）：TCP 隧道 + nginx 站点 + ACME 两阶段安装 + 端口台账 + doctor
+- v0.2：`doctor --watch`；UDP / HTTPS 隧道；Cloudflare 代理说明
+- v0.3：只读 Web 界面（台账 + 一键生成）
+- 不计划：自动改生产配置（默认永远关）、内置告警平台
 
 ## 支持这个项目
 
-如果 homepub 帮你省下了配 frp + 证书的半天，可以请我喝杯咖啡：
+如果 homepub 帮你省下了配 frp + 证书的半天：
 
-- 爱发电：<https://afdian.com/a/yourname>（占位，发布前替换成你的主页）
-- 企业赞助位（README logo + 每月 2 小时咨询）：在 issue 里说明需求
+- 爱发电：**上线后补充链接**（见 `docs/SUPPORT.md`）
+- 企业赞助位（README logo + 每月 2 小时咨询）：开 issue 说明需求
 
-打赏是自愿的，不承诺 SLA、不构成购买。
+打赏自愿，不承诺 SLA、不构成购买。
 
 ## 许可
 

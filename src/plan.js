@@ -1,13 +1,14 @@
 import { ConfigError } from './config.js';
 import {
-  renderAcme, renderClientInstall, renderFrpc, renderFrpcService, renderFrpsSnippet,
-  renderMapConf, renderNginx, renderPortsJson, renderPortsMarkdown, renderServerInstall
+  renderAcme, renderClientInstall, renderFrpc, renderFrpcService, renderFrpsExample,
+  renderFrpsSnippet, renderMapConf, renderNginxBootstrap, renderNginxSite,
+  renderPortsJson, renderPortsMarkdown, renderServerInstall
 } from './render.js';
 import { isIntInRange } from './util.js';
 
 /**
- * Assign tunnel ports. Existing assignments (from out/ports.json) win, so adding
- * a new service never moves an existing one. New services get the first free port.
+ * Assign tunnel ports. Existing assignments (from the ledger) win, so adding a
+ * new service never moves an existing one. New services get the first free port.
  */
 export function assignPorts(cfg, previous = {}) {
   const { portStart, portEnd } = cfg.tunnel;
@@ -47,10 +48,12 @@ export function buildPlan(cfg, { version = '0.1.0', token, previousPorts = {} } 
 
   add('server/nginx/00-homepub-map.conf', renderMapConf(version));
   for (const svc of cfg.services) {
-    add(`server/nginx/${svc.host}.conf`, renderNginx(cfg, svc, ports.get(svc.name), version));
+    add(`server/nginx/bootstrap/${svc.host}.conf`, renderNginxBootstrap(cfg, svc, version));
+    add(`server/nginx/sites/${svc.host}.conf`, renderNginxSite(cfg, svc, ports.get(svc.name), version));
   }
   add('server/acme.sh', renderAcme(cfg, version), 0o755);
   add('server/install.sh', renderServerInstall(cfg, version), 0o755);
+  add('server/frps.toml.example', renderFrpsExample(cfg, version));
   add('server/frps-snippet.toml', renderFrpsSnippet(cfg, version));
 
   add('ports.md', renderPortsMarkdown(cfg, ports, version));

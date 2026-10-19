@@ -6,6 +6,6 @@ COPY bin ./bin
 COPY src ./src
 COPY examples ./examples
 
-# usage:
-#   docker run --rm -v "$PWD:/work" -w /work ghcr.io/yourname/homepub:latest plan
+# build:  docker build -t homepub .
+# usage:  docker run --rm -v "$PWD:/work" -w /work homepub plan
 ENTRYPOINT ["node", "/app/bin/homepub.js"]

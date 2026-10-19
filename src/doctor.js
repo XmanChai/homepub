@@ -20,24 +20,39 @@ export function checkPort(host, port, timeoutMs = 2500) {
   });
 }
 
-export async function checkDns(host) {
-  try {
-    const addresses = await dns.resolve4(host);
-    return { ok: addresses.length > 0, addresses };
-  } catch (err) {
-    return { ok: false, addresses: [], error: err.code || err.message };
+/** Resolve A/AAAA records; falls back to the OS resolver for names like "localhost". */
+export async function resolveIps(host) {
+  const found = new Set();
+  for (const lookup of [dns.resolve4, dns.resolve6]) {
+    try {
+      for (const ip of await lookup(host)) found.add(ip);
+    } catch {
+      /* try the next resolver */
+    }
   }
+  if (found.size === 0) {
+    try {
+      const { address } = await dns.lookup(host);
+      if (address) found.add(address);
+    } catch {
+      /* unresolvable */
+    }
+  }
+  return [...found];
 }
 
-export function checkHttps(host, path = '/', timeoutMs = 8000) {
+/** The host must resolve to at least one address of the frps server. */
+export async function checkDns(host, expected) {
+  const addresses = await resolveIps(host);
+  const expectedAddresses = await resolveIps(expected);
+  const ok = addresses.length > 0 && expectedAddresses.length > 0 &&
+    addresses.some((ip) => expectedAddresses.includes(ip));
+  return { ok, addresses, expectedAddresses };
+}
+
+function probe(host, path, rejectUnauthorized, timeoutMs) {
   return new Promise((resolve) => {
     const started = Date.now();
-    let settled = false;
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      resolve({ ...value, ms: Date.now() - started });
-    };
     const req = https.request(
       {
         host,
@@ -45,9 +60,9 @@ export function checkHttps(host, path = '/', timeoutMs = 8000) {
         path,
         method: 'GET',
         servername: host,
-        rejectUnauthorized: false,
-        headers: { 'user-agent': 'homepub-doctor' },
-        timeout: timeoutMs
+        rejectUnauthorized,
+        timeout: timeoutMs,
+        headers: { 'user-agent': 'homepub-doctor' }
       },
       (res) => {
         let daysLeft = null;
@@ -60,19 +75,46 @@ export function checkHttps(host, path = '/', timeoutMs = 8000) {
           }
           issuer = cert?.issuer?.O ?? null;
         } catch {
-          /* certificate info is best-effort */
+          /* certificate details are best-effort */
         }
         res.resume();
-        finish({ ok: res.statusCode > 0 && res.statusCode < 400, status: res.statusCode, daysLeft, issuer });
+        resolve({
+          ok: res.statusCode > 0 && res.statusCode < 400,
+          status: res.statusCode,
+          daysLeft,
+          issuer,
+          ms: Date.now() - started
+        });
       }
     );
     req.on('timeout', () => {
       req.destroy();
-      finish({ ok: false, error: 'timeout' });
+      resolve({ ok: false, error: 'timeout', ms: Date.now() - started });
     });
-    req.on('error', (err) => finish({ ok: false, error: err.code || err.message }));
+    req.on('error', (err) => resolve({ ok: false, error: err.code || err.message, ms: Date.now() - started }));
     req.end();
   });
+}
+
+/**
+ * Two probes: one with full certificate validation (the one that decides "ok"),
+ * one permissive (only to read expiry/issuer). Expired or self-signed certs fail.
+ */
+export async function checkHttps(host, path = '/', timeoutMs = 8000) {
+  const [secure, detail] = await Promise.all([
+    probe(host, path, true, timeoutMs),
+    probe(host, path, false, timeoutMs)
+  ]);
+  const info = detail.daysLeft !== null ? detail : secure;
+  const expired = info.daysLeft !== null && info.daysLeft <= 0;
+  return {
+    ok: secure.ok && !expired,
+    status: secure.status ?? info.status,
+    daysLeft: info.daysLeft ?? null,
+    issuer: info.issuer ?? null,
+    error: secure.error ?? (expired ? 'CERT_EXPIRED' : undefined),
+    ms: secure.ms
+  };
 }
 
 /** Run every check; returns rows plus an overall ok flag. */
@@ -80,16 +122,9 @@ export async function runDoctor(cfg, { checkPortFn = checkPort, checkDnsFn = che
   const rows = [];
   for (const svc of cfg.services) {
     const local = await checkPortFn(svc.localHost, svc.localPort);
-    const dnsResult = await checkDnsFn(svc.host);
-    const dnsOk = dnsResult.ok && dnsResult.addresses.includes(cfg.server.addr);
+    const dnsResult = await checkDnsFn(svc.host, cfg.server.addr);
     const httpsResult = await checkHttpsFn(svc.host, svc.healthPath);
-    rows.push({
-      service: svc.name,
-      host: svc.host,
-      local,
-      dns: { ...dnsResult, ok: dnsOk },
-      https: httpsResult
-    });
+    rows.push({ service: svc.name, host: svc.host, local, dns: dnsResult, https: httpsResult });
   }
   const ok = rows.every((row) => row.local.ok && row.https.ok && row.dns.ok);
   return { rows, ok };

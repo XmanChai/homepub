@@ -19,9 +19,12 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: unit tests
         run: npm test
-      - name: generated shell syntax
+      - name: generate output
+        run: node bin/homepub.js apply --config examples/homepub.config.json --out out-example --token ci-token --ledger out-example/ports.json
+      - name: shell syntax
         run: |
-          node bin/homepub.js apply --config examples/homepub.config.json --out out-example --token ci-token
           bash -n out-example/client/install.sh
           bash -n out-example/server/install.sh
           bash -n out-example/server/acme.sh
+      - name: install e2e (fake nginx/acme/systemctl)
+        run: bash scripts/e2e-install.sh out-example
