@@ -1,0 +1,17 @@
+# Two ways to use this file:
+#   1) run the generator without installing Node:   docker compose run --rm homepub plan
+#   2) run frpc with the generated config:          docker compose --profile frpc up -d
+services:
+  homepub:
+    build: .
+    working_dir: /work
+    volumes:
+      - ./:/work
+
+  frpc:
+    # image tag may need adjusting; any frpc >= 0.52 image works
+    image: snowdreamtech/frpc:latest
+    profiles: ["frpc"]
+    restart: unless-stopped
+    volumes:
+      - ./out/client/frpc.toml:/etc/frp/frpc.toml:ro

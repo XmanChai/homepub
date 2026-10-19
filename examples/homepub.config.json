@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/yourname/homepub/main/docs/config.schema.json",
+  "domain": "example.com",
+  "server": {
+    "addr": "203.0.113.10",
+    "port": 7000,
+    "tokenEnv": "FRP_TOKEN",
+    "bindAddr": "127.0.0.1"
+  },
+  "tunnel": {
+    "portStart": 18081,
+    "portEnd": 18099
+  },
+  "paths": {
+    "out": "./out",
+    "frpcConfig": "/etc/frp/frpc.toml",
+    "nginxConfDir": "/etc/nginx/conf.d",
+    "nginxCertsDir": "/etc/nginx/certs",
+    "acmeHome": "/root/.acme.sh",
+    "acmeWebroot": "/var/www/acme"
+  },
+  "services": [
+    {
+      "name": "blog",
+      "subdomain": "blog",
+      "localPort": 8090,
+      "healthPath": "/",
+      "note": "static blog"
+    },
+    {
+      "name": "cloud",
+      "subdomain": "nc",
+      "localPort": 8080,
+      "healthPath": "/status.php",
+      "note": "Nextcloud"
+    },
+    {
+      "name": "music",
+      "subdomain": "wav",
+      "localPort": 8099,
+      "healthPath": "/healthz",
+      "note": "music player"
+    }
+  ]
+}

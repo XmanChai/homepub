@@ -1,0 +1,40 @@
+{
+  "name": "homepub",
+  "version": "0.1.0",
+  "description": "Publish self-hosted services to the internet with one command: frp + nginx + ACME, generated and drift-checked.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "homepub": "bin/homepub.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "bin",
+    "src",
+    "docs",
+    "examples",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:watch": "node --test --watch \"test/**/*.test.js\"",
+    "demo": "node bin/homepub.js plan --config examples/homepub.config.json"
+  },
+  "keywords": [
+    "frp",
+    "self-hosted",
+    "homelab",
+    "nginx",
+    "acme",
+    "reverse-proxy",
+    "tunnel"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourname/homepub"
+  }
+}
