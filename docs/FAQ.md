@@ -29,3 +29,11 @@ v0.1 只做 TCP（HTTP/HTTPS/WebSocket）。UDP 在 v0.2。
 
 **为什么还要写 frps 片段，不能全自动？**
 frps 属于"公网入口"，改错会全站不可用。工具给片段，你贴一次即可；`proxyBindAddr` 这一行是安全关键，值得人工确认。
+**frpc 不在 `/usr/local/bin/frpc` 怎么办？**
+生成的 `client/frpc.service` 是按这个路径写的。改 `ExecStart` 或建个软链：`sudo ln -s "$(which frpc)" /usr/local/bin/frpc`。如果你用 Docker 跑 frpc，用 `docker-compose.yml` 里的 `frpc` profile，不用 systemd。
+
+**nginx 1.25+ 对 `listen 443 ssl http2` 报 deprecated 警告？**
+只是警告，配置仍然有效。想消掉可改成 `listen 443 ssl;` + 单独一行 `http2 on;`（要求 nginx ≥ 1.25.1）。
+
+**支持 frp 哪个版本？**
+v0.52 及以上的 TOML 配置格式（`[[proxies]]`、`auth.token`、`transport.tls.enable`）。老版 INI 格式（`[common]`）不支持。

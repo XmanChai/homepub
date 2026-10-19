@@ -122,7 +122,9 @@ async function cmdPlan(args) {
   printPortsTable(cfg, plan.ports);
   printFileList('create:', diff.added);
   printFileList('update:', diff.changed);
-  if (diff.added.length === 0 && diff.changed.length === 0) console.log('no changes');
+  const ledgerState = (await readLedger(ledgerPath))?.services ? 'unchanged' : 'create';
+  console.log('ledger: ' + ledgerState + ' (' + ledgerPath + ')');
+  if (diff.added.length === 0 && diff.changed.length === 0) console.log('no file changes');
   for (const warning of plan.warnings) console.log('warning: ' + warning);
   return 0;
 }

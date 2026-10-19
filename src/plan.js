@@ -43,7 +43,7 @@ export function buildPlan(cfg, { version = '0.1.0', token, previousPorts = {} } 
 
   add('client/frpc.toml', renderFrpc(cfg, ports, { token, version }), 0o600);
   add('client/frpc.service', renderFrpcService(version));
-  add('client/install.sh', renderClientInstall(version), 0o755);
+  add('client/install.sh', renderClientInstall(cfg, version), 0o755);
 
   add('server/nginx/00-homepub-map.conf', renderMapConf(version));
   for (const svc of cfg.services) {

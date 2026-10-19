@@ -58,11 +58,11 @@ export function renderFrpcService(version) {
   ].join('\n');
 }
 
-export function renderClientInstall(version) {
+export function renderClientInstall(cfg, version) {
   return '#!/usr/bin/env bash\n' + hashHeader(version, 'install frpc config on the home server') + [
     'set -euo pipefail',
     'HERE="$(cd "$(dirname "$0")" && pwd)"',
-    'TARGET="${FRPC_CONFIG:-/etc/frp/frpc.toml}"',
+    'TARGET="${FRPC_CONFIG:-' + cfg.paths.frpcConfig + '}"',
     'TS="$(date +%Y%m%d-%H%M%S)"',
     '',
     'if [ ! -f "$HERE/frpc.toml" ] || [ ! -f "$HERE/frpc.service" ]; then',
@@ -146,7 +146,7 @@ export function renderAcme(cfg, version) {
     'ACME="${ACME_HOME:-' + cfg.paths.acmeHome + '}/acme.sh"',
     'WEBROOT="${ACME_WEBROOT:-' + cfg.paths.acmeWebroot + '}"',
     'CERT_DIR="${CERT_DIR:-' + cfg.paths.nginxCertsDir + '}"',
-    'mkdir -p "$CERT_DIR"',
+    'mkdir -p "$CERT_DIR" "$WEBROOT"',
     '',
     'issue() {',
     '  local domain="$1"',
