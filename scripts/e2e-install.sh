@@ -79,6 +79,30 @@ fi
 grep -q "rolling back" "$TMP/rollback.log"
 if ls "$TMP/conf.d2"/*.conf >/dev/null 2>&1; then echo "rollback left files behind"; exit 1; fi
 
+echo "== acme.sh without the exec bit (scp without -p) must still switch to HTTPS"
+chmod 644 "$OUT/server/acme.sh"
+rm -rf "$TMP/conf.d3" "$TMP/certs3" && mkdir -p "$TMP/conf.d3" "$TMP/certs3"
+CONF_DIR="$TMP/conf.d3" NGINX_CONF_DIR="$TMP/conf.d3" CERT_DIR="$TMP/certs3" bash "$OUT/server/install.sh" > "$TMP/scp.log" 2>&1 || { cat "$TMP/scp.log"; exit 1; }
+grep -q "listen 443 ssl" "$TMP/conf.d3/blog.example.com.conf" || { echo "644 acme.sh left the site on bootstrap"; cat "$TMP/scp.log"; exit 1; }
+
+echo "== missing acme.sh must fail loudly, not report success"
+mv "$OUT/server/acme.sh" "$OUT/server/acme.sh.hidden"
+rm -rf "$TMP/conf.d4" "$TMP/certs4" && mkdir -p "$TMP/conf.d4" "$TMP/certs4"
+if CONF_DIR="$TMP/conf.d4" NGINX_CONF_DIR="$TMP/conf.d4" CERT_DIR="$TMP/certs4" bash "$OUT/server/install.sh" > "$TMP/noacme.log" 2>&1; then
+  echo "install.sh should fail when acme.sh is missing"; exit 1
+fi
+grep -q "acme.sh not found" "$TMP/noacme.log"
+mv "$OUT/server/acme.sh.hidden" "$OUT/server/acme.sh"
+
+echo "== rollback must restore the user original config, not the bootstrap"
+chmod +x "$OUT/server/acme.sh"
+rm -rf "$TMP/conf.d5" "$TMP/certs5" && mkdir -p "$TMP/conf.d5" "$TMP/certs5"
+echo "# ORIGINAL-USER-CONFIG" > "$TMP/conf.d5/blog.example.com.conf"
+if CONF_DIR="$TMP/conf.d5" NGINX_CONF_DIR="$TMP/conf.d5" CERT_DIR="$TMP/certs5" FAKE_NGINX_FAIL=1 bash "$OUT/server/install.sh" > "$TMP/rollback2.log" 2>&1; then
+  echo "install.sh should have failed"; exit 1
+fi
+grep -q "ORIGINAL-USER-CONFIG" "$TMP/conf.d5/blog.example.com.conf" || { echo "rollback lost the original config"; cat "$TMP/rollback2.log"; exit 1; }
+
 echo "== placeholder token must abort the client install"
 sed -i.bak 's/auth.token = ".*"/auth.token = "CHANGE_ME_TOKEN"/' "$OUT/client/frpc.toml"
 if FRPC_BIN=/bin/true bash "$OUT/client/install.sh" > "$TMP/client.log" 2>&1; then

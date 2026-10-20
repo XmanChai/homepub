@@ -179,7 +179,7 @@ async function cmdApply(args) {
   printFileList('created:', result.added);
   printFileList('updated:', result.changed);
   printFileList('removed:', result.removed);
-  if (result.written.length === 0) console.log('nothing to do (already up to date)');
+  if (result.written.length === 0 && result.removed.length === 0) console.log('nothing to do (already up to date)');
   if (result.obsolete.length > 0 && !args.prune) {
     printFileList('stale (run "homepub apply --prune" to delete):', result.obsolete);
   }
@@ -189,12 +189,14 @@ async function cmdApply(args) {
 }
 
 async function cmdStatus(args) {
-  let ledgerPath = resolve('./ports.json');
+  let ledgerPath = args.ledger ? resolve(args.ledger) : resolve('./ports.json');
   let cfg = null;
   const configPath = args.config ?? (existsSync(DEFAULT_CONFIG) ? DEFAULT_CONFIG : null);
-  if (configPath) {
+  if (args.ledger && !configPath) {
+    cfg = null;
+  } else if (configPath) {
     cfg = loadConfig(configPath);
-    ledgerPath = resolve(cfg.baseDir, cfg.paths.ledger);
+    if (!args.ledger) ledgerPath = resolve(cfg.baseDir, cfg.paths.ledger);
   } else if (existsSync(resolve('./ports.json'))) {
     cfg = null;
   } else {

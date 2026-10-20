@@ -46,6 +46,10 @@ test('acme script checks exit codes correctly and verifies the installed files',
 test('server install is two-phase with rollback and stale-site cleanup', () => {
   const script = file('server/install.sh');
   assert.match(script, /NEED_CERTS=0/);
+  assert.ok(script.includes('[ ! -f "$HERE/acme.sh" ]'));
+  assert.ok(!script.includes('[ -x "$HERE/acme.sh" ]'));
+  assert.ok(script.includes('acme.sh not found'));
+  assert.ok(script.includes('[ -f "$BACKUP_DIR/$host.conf" ] || cp -a'));
   assert.ok(script.includes('install_conf "$host" bootstrap'));
   assert.ok(script.includes('install_conf "$host" sites'));
   assert.match(script, /trap rollback ERR/);
