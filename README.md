@@ -14,7 +14,7 @@
 
 ## 仓库在哪
 
-- 主仓库（规划中）：GitHub —— 收 issue / PR、跑 CI、发 Release
+- 主仓库：<https://github.com/XmanChai/homepub> —— 收 issue / PR、跑 CI、发 Release
 - 国内镜像：<https://git.xmanchai.top/xmanchai/homepub> —— 只读镜像，方便国内 clone 和备份
 - 镜像说明见 [docs/HOSTING.md](docs/HOSTING.md)
 

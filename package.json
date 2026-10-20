@@ -35,13 +35,13 @@
     "reverse-proxy",
     "tunnel"
   ],
-  "homepage": "https://git.xmanchai.top/xmanchai/homepub",
+  "homepage": "https://github.com/XmanChai/homepub",
   "repository": {
     "type": "git",
-    "url": "git+https://git.xmanchai.top/xmanchai/homepub.git"
+    "url": "git+https://github.com/XmanChai/homepub.git"
   },
   "bugs": {
-    "url": "https://git.xmanchai.top/xmanchai/homepub/issues"
+    "url": "https://github.com/XmanChai/homepub/issues"
   },
   "funding": {
     "type": "individual",

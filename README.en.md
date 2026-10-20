@@ -14,7 +14,7 @@ browser --HTTPS(443)--> nginx on the public server --HTTP--> 127.0.0.1:18081
 
 ## Where the code lives
 
-- Canonical (planned): GitHub - issues, PRs, CI, releases.
+- Canonical: <https://github.com/XmanChai/homepub> - issues, PRs, CI, releases.
 - China mirror: <https://git.xmanchai.top/xmanchai/homepub> - read-only mirror, see [docs/HOSTING.md](docs/HOSTING.md).
 
 ## The problem

@@ -45,6 +45,17 @@ function Invoke-Api {
   }
 }
 
+function Get-StoredCred {
+  param([string]$HostName)
+  $env:GCM_INTERACTIVE = 'never'
+  $inputText = "protocol=https`nhost=$HostName`n`n"
+  $lines = $inputText | git credential fill 2>$null
+  foreach ($line in $lines) {
+    if ($line -like 'password=*') { return $line.Substring(9) }
+  }
+  return $null
+}
+
 function Test-RemoteRepo {
   param([string]$Uri, [hashtable]$Headers)
   try {
@@ -109,8 +120,20 @@ try {
   }
 
   if (-not $SkipGitea) {
-    if (-not $env:GITEA_TOKEN) { Write-Host 'WARN: GITEA_TOKEN missing, skip mirror setup'; return }
-    $giteaHeaders = @{ Authorization = 'token ' + $env:GITEA_TOKEN; 'User-Agent' = 'homepub-publish' }
+    $giteaHeaders = $null
+    if ($env:GITEA_TOKEN) {
+      $giteaHeaders = @{ Authorization = 'token ' + $env:GITEA_TOKEN; 'User-Agent' = 'homepub-publish' }
+    } else {
+      # fall back to the credential stored by Git Credential Manager for the Gitea host
+      $giteaHost = ([uri]$GiteaUrl).Host
+      $stored = Get-StoredCred -HostName $giteaHost
+      if ($stored) {
+        $basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($GiteaOwner + ':' + $stored))
+        $giteaHeaders = @{ Authorization = 'Basic ' + $basic; 'User-Agent' = 'homepub-publish' }
+        Write-Host '    using the Gitea credential stored by Git Credential Manager'
+      }
+    }
+    if (-not $giteaHeaders) { Write-Host 'WARN: no Gitea credential (set GITEA_TOKEN or login once in the browser), skip mirror setup'; return }
     $repoUri = "$GiteaUrl/api/v1/repos/$GiteaOwner/$Repo"
     Write-Host "==> Gitea mirror: $GiteaOwner/$Repo"
     if (Test-RemoteRepo -Uri $repoUri -Headers $giteaHeaders) {
