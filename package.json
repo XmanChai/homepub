@@ -34,5 +34,17 @@
     "acme",
     "reverse-proxy",
     "tunnel"
-  ]
+  ],
+  "homepage": "https://git.xmanchai.top/xmanchai/homepub",
+  "repository": {
+    "type": "git",
+    "url": "git+https://git.xmanchai.top/xmanchai/homepub.git"
+  },
+  "bugs": {
+    "url": "https://git.xmanchai.top/xmanchai/homepub/issues"
+  },
+  "funding": {
+    "type": "individual",
+    "url": "https://afdian.com/a/xmanchai"
+  }
 }

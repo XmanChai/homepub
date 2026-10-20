@@ -12,6 +12,11 @@ browser --HTTPS(443)--> nginx on the public server --HTTP--> 127.0.0.1:18081
                                                         127.0.0.1:8090 your service
 ```
 
+## Where the code lives
+
+- Canonical (planned): GitHub - issues, PRs, CI, releases.
+- China mirror: <https://git.xmanchai.top/xmanchai/homepub> - read-only mirror, see [docs/HOSTING.md](docs/HOSTING.md).
+
 ## The problem
 
 Exposing a homelab service means editing three places by hand: `frpc.toml` (service, local port, tunnel port), `frps.toml` (token, allowed port range) and nginx (server block, certificates, renewal). Something always gets missed: port 18081 is already taken, a certificate expired, a service died silently, or a machine migration has to be rebuilt from memory.
@@ -67,7 +72,7 @@ Flags: `--config`, `--out`, `--token`, `--force`, `--prune`, `--json`.
 
 ## Support
 
-Tips: link to be added after launch (see `docs/SUPPORT.md`). Sponsorship (logo + consulting): open an issue.
+Tips: <https://afdian.com/a/xmanchai>. Sponsorship (logo + consulting): open an issue.
 
 ## License
 

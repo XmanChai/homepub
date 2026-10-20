@@ -12,6 +12,12 @@
                                               127.0.0.1:8090 你的服务
 ```
 
+## 仓库在哪
+
+- 主仓库（规划中）：GitHub —— 收 issue / PR、跑 CI、发 Release
+- 国内镜像：<https://git.xmanchai.top/xmanchai/homepub> —— 只读镜像，方便国内 clone 和备份
+- 镜像说明见 [docs/HOSTING.md](docs/HOSTING.md)
+
 ## 它解决什么问题
 
 给家庭服务器 / 小公司自建服务开公网，通常要在三处同时改配置：家里的 `frpc.toml`、公网的 `frps.toml`、以及 nginx 站点 + 证书。改三处必然漏一处，于是：
@@ -150,7 +156,7 @@ music         FAIL ECONNREFUSED         ok                        FAIL ECONNREFU
 
 如果 homepub 帮你省下了配 frp + 证书的半天：
 
-- 爱发电：**上线后补充链接**（见 `docs/SUPPORT.md`）
+- 爱发电：<https://afdian.com/a/xmanchai>
 - 企业赞助位（README logo + 每月 2 小时咨询）：开 issue 说明需求
 
 打赏自愿，不承诺 SLA、不构成购买。
