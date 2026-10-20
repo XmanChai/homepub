@@ -11,7 +11,26 @@
 - [ ] README 顶部"主仓库（规划中）"改成真实 GitHub 链接
 - [ ] GitHub 仓库设置：开启 "Require approval for first-time contributors"，避免垃圾 PR 消耗 CI
 
-## 2. 必须真机验证（本机无法替代）
+## 2. 一键发布（PowerShell）
+
+先把 token 放进 `%USERPROFILE%\.homepub\publish.env`（不要提交到仓库）：
+
+```ini
+GITHUB_TOKEN=ghp_xxx
+GITEA_TOKEN=xxx
+GITHUB_OWNER=xmanchai
+```
+
+然后：
+
+```powershell
+pwsh -File scripts/publish.ps1 -Owner xmanchai -Tag v0.1.0-rc1
+```
+
+脚本会：创建 GitHub 仓库（若不存在）→ 推 main → 推 tag → 在 Gitea 建"拉取镜像"（8 小时同步）。已存在则幂等跳过。
+Gitea 侧不想自动建仓时加 `-SkipGitea`，手动按 [docs/HOSTING.md](docs/HOSTING.md) 配 Pull Mirror。
+
+## 3. 必须真机验证（本机无法替代）
 
 - [ ] 在一台干净 Ubuntu（有 nginx + acme.sh）上，从零执行 README 第 5–6 步
 - [ ] 首次安装后 `curl -I https://<host>` 正常、证书有效期正确
@@ -20,7 +39,7 @@
 - [ ] `homepub doctor` 对过期/自签证书确实报失败
 - [ ] `docker build -t homepub .` 与 `docker compose run --rm homepub plan`
 
-## 3. 发布
+## 4. 发布
 
 - [ ] `npm test`（33 个）、`bash scripts/e2e-install.sh <out>`（6 个场景）全绿
 - [ ] `npm pack --dry-run` 包含 `examples/`、`CHANGELOG.md`
